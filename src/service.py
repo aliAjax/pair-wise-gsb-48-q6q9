@@ -2,7 +2,7 @@
 from typing import Any, Dict, List, Optional
 
 from .audit import AuditRecorder
-from .domain import Actor, PermissionDenied, text
+from .domain import Actor, NotFound, PermissionDenied, text
 from .repository import Repository
 from .rules import DomainRules
 
@@ -66,6 +66,38 @@ class Service:
         actor = self._actor(actor)
         self._ensure_known_role(actor)
         return self.audit.timeline(record_id)
+
+    def list_announcements(self, actor: Actor, limit: int = 100) -> List[Dict[str, Any]]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        return self.repository.list_announcements(limit=limit)
+
+    def get_announcement(self, actor: Actor, reference: str) -> Dict[str, Any]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        announcement = self.repository.get_announcement(text({"reference": reference}, "reference"))
+        if announcement is None:
+            raise NotFound("公司行动公告不存在")
+        return announcement
+
+    def adjust_announcement_ratio(self, actor: Actor, reference: str, expected_version: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        if not self.rules.role_can_action(actor.role, "adjust_ratio"):
+            raise PermissionDenied("角色无权调整公司行动比例")
+        reference = text({"reference": reference}, "reference")
+        ratio = self.rules.validate_ratio(data or {})
+        # 同一公告的重试必须携带同一request_id，保证不重复调整
+        request_id = text(data or {}, "request_id")
+        return self.repository.adjust_announcement(
+            reference=reference,
+            expected_version=int(expected_version),
+            ratio=ratio,
+            request_id=request_id,
+            actor_id=actor.user_id,
+            build_adjustment=self.rules.build_adjustment,
+            is_unsettled=self.rules.is_unsettled,
+        )
 
     def stats(self, actor: Actor) -> Dict[str, int]:
         actor = self._actor(actor)
