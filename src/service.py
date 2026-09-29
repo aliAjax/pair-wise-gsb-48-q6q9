@@ -67,6 +67,34 @@ class Service:
         self._ensure_known_role(actor)
         return self.audit.timeline(record_id)
 
+    def confirm_announcement(self, actor: Actor, reference: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        if not self.rules.role_can_action(actor.role, "confirm_announcement"):
+            raise PermissionDenied("角色无权确认公司行动公告")
+        reference = text({"reference": reference}, "reference")
+        announcement = self.rules.validate_announcement(payload or {})
+        result = self.repository.confirm_announcement(
+            reference=reference,
+            instrument=announcement["instrument"],
+            corporate_action=announcement["corporate_action"],
+            action_ratio=float(announcement["action_ratio"]),
+            actor_id=actor.user_id,
+            transform=lambda record: self.rules.transform_for_announcement(
+                record, announcement["instrument"], announcement["corporate_action"], float(announcement["action_ratio"])
+            ),
+        )
+        if result["duplicate"]:
+            result["message"] = "公告已确认，比例未变化，未重复调整"
+        else:
+            result["message"] = "公告已确认，%s条未交收指令按新比例重算" % len(result["adjusted"])
+        return result
+
+    def get_announcement(self, actor: Actor, reference: str) -> Dict[str, Any]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        return self.repository.get_announcement(text({"reference": reference}, "reference"))
+
     def stats(self, actor: Actor) -> Dict[str, int]:
         actor = self._actor(actor)
         self._ensure_known_role(actor)
